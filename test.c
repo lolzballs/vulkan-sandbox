@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <vulkan/vulkan.h>
 
 struct input_dim {
@@ -72,7 +73,21 @@ load_spirv_shader_module(const char *path, VkShaderModuleCreateInfo *info) {
     return 0;
 }
 
-int main() {
+static VkResult
+create_vulkan_instance(VkInstance *instance) {
+    VkResult res = VK_ERROR_UNKNOWN;
+
+    uint32_t layer_count = 32;
+    VkLayerProperties layers[32];
+
+    res = vkEnumerateInstanceLayerProperties(&layer_count, layers);
+    if (res == VK_INCOMPLETE) {
+        fprintf(stderr, "warning: there were more instance layers "
+                "than the max supported (32)\n");
+    } else if (res != VK_SUCCESS) {
+        return res;
+    }
+
     VkApplicationInfo application_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .apiVersion = VK_API_VERSION_1_2,
@@ -83,8 +98,37 @@ int main() {
         .pApplicationInfo = &application_info,
     };
 
+    const char *validation_layer = "VK_LAYER_KHRONOS_validation";
+    bool validation_layer_present = false;
+    for (uint32_t layer = 0; layer < layer_count; layer++) {
+        if (strncmp(layers[layer].layerName,
+                    validation_layer, VK_MAX_EXTENSION_NAME_SIZE) == 0) {
+            validation_layer_present = true;
+            break;
+        }
+    }
+
+    if (validation_layer_present) {
+        create_info.enabledLayerCount = 1;
+        create_info.ppEnabledLayerNames = &validation_layer;
+    } else {
+        fprintf(stderr, "warning: validation layer is not present\n");
+    }
+
+    res = vkCreateInstance(&create_info, NULL, instance);
+    if (res != VK_SUCCESS) {
+        return res;
+    }
+
+    return res;
+}
+
+int main() {
+    VkResult res = VK_ERROR_UNKNOWN;
+
     VkInstance instance;
-    vkCreateInstance(&create_info, NULL, &instance);
+    res = create_vulkan_instance(&instance);
+    assert(res == VK_SUCCESS);
 
     uint32_t physical_device_count = 0;
     vkEnumeratePhysicalDevices(instance, &physical_device_count, NULL);
@@ -118,9 +162,6 @@ int main() {
 
     VkQueue queue;
     vkGetDeviceQueue(device, queue_index, 0, &queue);
-
-
-    VkResult res;
 
     VkDeviceSize buffer_size = 1920 * 1080 * sizeof(uint32_t);
     VkBuffer buffer;
