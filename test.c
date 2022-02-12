@@ -25,18 +25,32 @@ find_compute_queue(VkPhysicalDevice physical_device) {
 }
 
 static int32_t
-find_device_local_memory(VkPhysicalDevice physical_device) {
+find_device_memory(VkPhysicalDevice physical_device, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties memory_properties;
     vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
 
     for (int32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
-        if (memory_properties.memoryTypes[i].propertyFlags &
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) {
+        if (memory_properties.memoryTypes[i].propertyFlags & properties) {
             return i;
         }
     }
 
     return -1;
+}
+
+static VkResult
+create_buffer(VkBuffer *buffer, VkDevice device, size_t queue_index,
+        VkDeviceSize size, VkBufferUsageFlags usage) {
+    VkBufferCreateInfo create_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 1,
+        .pQueueFamilyIndices = (const uint32_t *) &queue_index,
+    };
+
+    return vkCreateBuffer(device, &create_info, NULL, buffer);
 }
 
 static int32_t
@@ -51,6 +65,7 @@ load_spirv_shader_module(const char *path, VkShaderModuleCreateInfo *info) {
     fseeko(file, 0, SEEK_SET);
     void *code = malloc(info->codeSize);
     fread(code, 1, info->codeSize, file);
+    fclose(file);
 
     info->pCode = code;
 
@@ -108,24 +123,17 @@ int main() {
     VkResult res;
 
     VkDeviceSize buffer_size = 1920 * 1080 * sizeof(uint32_t);
-    VkBufferCreateInfo buffer_create_info = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .flags = 0,
-        .size = buffer_size,
-        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 1,
-        .pQueueFamilyIndices = (const uint32_t *) &queue_index,
-    };
     VkBuffer buffer;
-    res = vkCreateBuffer(device, &buffer_create_info, NULL, &buffer);
+    res = create_buffer(&buffer, device, queue_index, buffer_size,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     assert(res == VK_SUCCESS);
 
     VkMemoryRequirements memory_requirements;
     vkGetBufferMemoryRequirements(device, buffer, &memory_requirements);
 
     /* TODO: search for memory based on memory_requirements */
-    int32_t memory_index = find_device_local_memory(physical_devices[0]);
+    int32_t memory_index = find_device_memory(physical_devices[0],
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     assert(memory_index >= 0);
 
     VkMemoryAllocateInfo allocate_info = {
@@ -141,6 +149,28 @@ int main() {
     res = vkBindBufferMemory(device, buffer, memory, 0);
     assert(res == VK_SUCCESS);
 
+    int32_t host_memory_index = find_device_memory(physical_devices[0],
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    assert(host_memory_index >= 0);
+
+    /* allocate host memory for host buffer */
+    VkMemoryAllocateInfo host_allocate_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memory_requirements.size,
+        .memoryTypeIndex = host_memory_index,
+    };
+
+    VkDeviceMemory host_memory;
+    res = vkAllocateMemory(device, &host_allocate_info, NULL, &host_memory);
+    assert(res == VK_SUCCESS);
+
+    VkBuffer host_buffer;
+    res = create_buffer(&host_buffer, device, queue_index, buffer_size,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    assert(res == VK_SUCCESS);
+
+    res = vkBindBufferMemory(device, host_buffer, host_memory, 0);
+    assert(res == VK_SUCCESS);
 
     VkDescriptorSetLayoutBinding dset_layout_binding = {
         .binding = 0,
@@ -273,6 +303,31 @@ int main() {
 
     vkCmdDispatch(cmd_buffer, (1920 + 15) / 16, (1080 + 15) / 16, 1);
 
+    /* wait for compute shader to finish, then copy to host memory buffer */
+    VkBufferMemoryBarrier memory_barrier = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buffer,
+        .offset = 0,
+        .size = VK_WHOLE_SIZE,
+    };
+    vkCmdPipelineBarrier(cmd_buffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0, NULL,
+            1, &memory_barrier,
+            0, NULL);
+
+    VkBufferCopy buffer_copy = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = buffer_size,
+    };
+    vkCmdCopyBuffer(cmd_buffer, buffer, host_buffer, 1, &buffer_copy);
+
     res = vkEndCommandBuffer(cmd_buffer);
     assert(res == VK_SUCCESS);
 
@@ -296,4 +351,12 @@ int main() {
     assert(res == VK_SUCCESS);
 
     vkDestroyFence(device, fence, NULL);
+
+    uint8_t *data;
+    res = vkMapMemory(device, host_memory, 0, buffer_size, 0, (void **) &data);
+    assert(res == VK_SUCCESS);
+
+    FILE *file = fopen("buffer.bin", "wb");
+    fwrite(data, buffer_size, 1, file);
+    fclose(file);
 }
