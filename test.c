@@ -139,13 +139,14 @@ int main() {
     assert(physical_device_count > 0);
 
     int32_t queue_index = find_compute_queue(physical_devices[0]);
+    float queue_priority = 1.0;
     assert(queue_index >= 0);
 
     VkDeviceQueueCreateInfo queue_create_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
         .queueFamilyIndex = queue_index,
         .queueCount = 1,
-        .pQueuePriorities = NULL,
+        .pQueuePriorities = &queue_priority,
     };
 
     VkDeviceCreateInfo device_create_info = {
@@ -277,9 +278,9 @@ int main() {
     vkCreateShaderModule(device, &shader_module_create_info, NULL, &shader_module);
 
     VkPushConstantRange push_constant_range = {
-        .stageFlags = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .offset = 0,
-        .size = sizeof(int32_t) * 2, /* ivec2 */
+        .size = sizeof(struct input_dim), /* ivec2 */
     };
 
     VkPipelineLayoutCreateInfo pipeline_layout_create_info = {
@@ -346,7 +347,7 @@ int main() {
 
     /* wait for compute shader to finish, then copy to host memory buffer */
     VkBufferMemoryBarrier memory_barrier = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
