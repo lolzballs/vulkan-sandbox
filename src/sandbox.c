@@ -5,6 +5,8 @@
 #include <string.h>
 #include <vulkan/vulkan.h>
 
+#include "basic.comp.h"
+
 struct input_dim {
     int32_t width;
     int32_t height;
@@ -52,25 +54,6 @@ create_buffer(VkBuffer *buffer, VkDevice device, size_t queue_index,
     };
 
     return vkCreateBuffer(device, &create_info, NULL, buffer);
-}
-
-static int32_t
-load_spirv_shader_module(const char *path, VkShaderModuleCreateInfo *info) {
-    info->sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info->pNext = 0;
-    info->flags = 0;
-
-    FILE *file = fopen(path, "rb");
-    fseeko(file, 0, SEEK_END);
-    info->codeSize = ftello(file);
-    fseeko(file, 0, SEEK_SET);
-    void *code = malloc(info->codeSize);
-    fread(code, 1, info->codeSize, file);
-    fclose(file);
-
-    info->pCode = code;
-
-    return 0;
 }
 
 static VkResult
@@ -271,8 +254,11 @@ int main() {
     };
     vkUpdateDescriptorSets(device, 1, &write_dset, 0, NULL);
 
-    VkShaderModuleCreateInfo shader_module_create_info;
-    load_spirv_shader_module("./a.spv", &shader_module_create_info);
+    VkShaderModuleCreateInfo shader_module_create_info = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = sizeof(basic_comp_data),
+        .pCode = basic_comp_data,
+    };
 
     VkShaderModule shader_module;
     vkCreateShaderModule(device, &shader_module_create_info, NULL, &shader_module);
