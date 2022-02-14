@@ -6,26 +6,12 @@
 #include <vulkan/vulkan.h>
 
 #include "basic.comp.h"
+#include "vulkan/context.h"
 
 struct input_dim {
     int32_t width;
     int32_t height;
 };
-
-static int32_t
-find_compute_queue(VkPhysicalDevice physical_device) {
-    uint32_t count = 256;
-    VkQueueFamilyProperties properties[256];
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &count, properties);
-
-    int32_t candidate = -1;
-    for (int32_t i = 0; i < count; i++) {
-        if (properties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
-            return i;
-        }
-    }
-    return candidate;
-}
 
 static int32_t
 find_device_memory(VkPhysicalDevice physical_device, VkMemoryPropertyFlags properties) {
@@ -42,122 +28,34 @@ find_device_memory(VkPhysicalDevice physical_device, VkMemoryPropertyFlags prope
 }
 
 static VkResult
-create_buffer(VkBuffer *buffer, VkDevice device, size_t queue_index,
+create_buffer(VkBuffer *buffer, VkDevice device,
         VkDeviceSize size, VkBufferUsageFlags usage) {
     VkBufferCreateInfo create_info = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = size,
         .usage = usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 1,
-        .pQueueFamilyIndices = (const uint32_t *) &queue_index,
     };
 
     return vkCreateBuffer(device, &create_info, NULL, buffer);
 }
 
-static VkResult
-create_vulkan_instance(VkInstance *instance) {
-    VkResult res = VK_ERROR_UNKNOWN;
-
-    uint32_t layer_count = 32;
-    VkLayerProperties layers[32];
-
-    res = vkEnumerateInstanceLayerProperties(&layer_count, layers);
-    if (res == VK_INCOMPLETE) {
-        fprintf(stderr, "warning: there were more instance layers "
-                "than the max supported (32)\n");
-    } else if (res != VK_SUCCESS) {
-        return res;
-    }
-
-    VkApplicationInfo application_info = {
-        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .apiVersion = VK_API_VERSION_1_2,
-    };
-
-    VkInstanceCreateInfo create_info = {
-        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pApplicationInfo = &application_info,
-    };
-
-    const char *validation_layer = "VK_LAYER_KHRONOS_validation";
-    bool validation_layer_present = false;
-    for (uint32_t layer = 0; layer < layer_count; layer++) {
-        if (strncmp(layers[layer].layerName,
-                    validation_layer, VK_MAX_EXTENSION_NAME_SIZE) == 0) {
-            validation_layer_present = true;
-            break;
-        }
-    }
-
-    if (validation_layer_present) {
-        create_info.enabledLayerCount = 1;
-        create_info.ppEnabledLayerNames = &validation_layer;
-    } else {
-        fprintf(stderr, "warning: validation layer is not present\n");
-    }
-
-    res = vkCreateInstance(&create_info, NULL, instance);
-    if (res != VK_SUCCESS) {
-        return res;
-    }
-
-    return res;
-}
-
 int main() {
     VkResult res = VK_ERROR_UNKNOWN;
 
-    VkInstance instance;
-    res = create_vulkan_instance(&instance);
-    assert(res == VK_SUCCESS);
-
-    uint32_t physical_device_count = 0;
-    vkEnumeratePhysicalDevices(instance, &physical_device_count, NULL);
-
-    VkPhysicalDevice *physical_devices = malloc(sizeof(VkPhysicalDevice) * physical_device_count);
-    vkEnumeratePhysicalDevices(instance, &physical_device_count, physical_devices);
-
-    assert(physical_device_count > 0);
-
-    int32_t queue_index = find_compute_queue(physical_devices[0]);
-    float queue_priority = 1.0;
-    assert(queue_index >= 0);
-
-    VkDeviceQueueCreateInfo queue_create_info = {
-        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-        .queueFamilyIndex = queue_index,
-        .queueCount = 1,
-        .pQueuePriorities = &queue_priority,
-    };
-
-    VkDeviceCreateInfo device_create_info = {
-        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .queueCreateInfoCount = 1,
-        .pQueueCreateInfos = &queue_create_info,
-        .enabledExtensionCount = 0,
-        .ppEnabledExtensionNames = NULL,
-        .pNext = NULL,
-    };
-
-    VkDevice device;
-    vkCreateDevice(physical_devices[0], &device_create_info, NULL, &device);
-
-    VkQueue queue;
-    vkGetDeviceQueue(device, queue_index, 0, &queue);
+    struct vulkan_ctx *ctx = vulkan_ctx_create();
 
     VkDeviceSize buffer_size = 1920 * 1080 * sizeof(uint32_t);
     VkBuffer buffer;
-    res = create_buffer(&buffer, device, queue_index, buffer_size,
+    res = create_buffer(&buffer, ctx->device, buffer_size,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     assert(res == VK_SUCCESS);
 
     VkMemoryRequirements memory_requirements;
-    vkGetBufferMemoryRequirements(device, buffer, &memory_requirements);
+    vkGetBufferMemoryRequirements(ctx->device, buffer, &memory_requirements);
 
     /* TODO: search for memory based on memory_requirements */
-    int32_t memory_index = find_device_memory(physical_devices[0],
+    int32_t memory_index = find_device_memory(ctx->physical_device,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     assert(memory_index >= 0);
 
@@ -168,13 +66,13 @@ int main() {
     };
 
     VkDeviceMemory memory;
-    res = vkAllocateMemory(device, &allocate_info, NULL, &memory);
+    res = vkAllocateMemory(ctx->device, &allocate_info, NULL, &memory);
     assert(res == VK_SUCCESS);
 
-    res = vkBindBufferMemory(device, buffer, memory, 0);
+    res = vkBindBufferMemory(ctx->device, buffer, memory, 0);
     assert(res == VK_SUCCESS);
 
-    int32_t host_memory_index = find_device_memory(physical_devices[0],
+    int32_t host_memory_index = find_device_memory(ctx->physical_device,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
     assert(host_memory_index >= 0);
 
@@ -186,15 +84,15 @@ int main() {
     };
 
     VkDeviceMemory host_memory;
-    res = vkAllocateMemory(device, &host_allocate_info, NULL, &host_memory);
+    res = vkAllocateMemory(ctx->device, &host_allocate_info, NULL, &host_memory);
     assert(res == VK_SUCCESS);
 
     VkBuffer host_buffer;
-    res = create_buffer(&host_buffer, device, queue_index, buffer_size,
+    res = create_buffer(&host_buffer, ctx->device, buffer_size,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     assert(res == VK_SUCCESS);
 
-    res = vkBindBufferMemory(device, host_buffer, host_memory, 0);
+    res = vkBindBufferMemory(ctx->device, host_buffer, host_memory, 0);
     assert(res == VK_SUCCESS);
 
     VkDescriptorSetLayoutBinding dset_layout_binding = {
@@ -210,7 +108,7 @@ int main() {
         .pBindings = &dset_layout_binding,
     };
     VkDescriptorSetLayout dset_layout;
-    res = vkCreateDescriptorSetLayout(device, &dset_layout_create_info, NULL, &dset_layout);
+    res = vkCreateDescriptorSetLayout(ctx->device, &dset_layout_create_info, NULL, &dset_layout);
     assert(res == VK_SUCCESS);
 
     VkDescriptorPoolSize dpool_size = {
@@ -225,7 +123,7 @@ int main() {
     };
 
     VkDescriptorPool dpool;
-    res = vkCreateDescriptorPool(device, &dpool_create_info, NULL, &dpool);
+    res = vkCreateDescriptorPool(ctx->device, &dpool_create_info, NULL, &dpool);
     assert(res == VK_SUCCESS);
 
     VkDescriptorSetAllocateInfo dset_allocate_info = {
@@ -235,7 +133,7 @@ int main() {
         .pSetLayouts = &dset_layout,
     };
     VkDescriptorSet dset;
-    res = vkAllocateDescriptorSets(device, &dset_allocate_info, &dset);
+    res = vkAllocateDescriptorSets(ctx->device, &dset_allocate_info, &dset);
     assert(res == VK_SUCCESS);
 
     VkDescriptorBufferInfo descriptor_buffer_info = {
@@ -252,7 +150,7 @@ int main() {
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         .pBufferInfo = &descriptor_buffer_info,
     };
-    vkUpdateDescriptorSets(device, 1, &write_dset, 0, NULL);
+    vkUpdateDescriptorSets(ctx->device, 1, &write_dset, 0, NULL);
 
     VkShaderModuleCreateInfo shader_module_create_info = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -261,7 +159,7 @@ int main() {
     };
 
     VkShaderModule shader_module;
-    vkCreateShaderModule(device, &shader_module_create_info, NULL, &shader_module);
+    vkCreateShaderModule(ctx->device, &shader_module_create_info, NULL, &shader_module);
 
     VkPushConstantRange push_constant_range = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -278,7 +176,7 @@ int main() {
     };
 
     VkPipelineLayout pipeline_layout;
-    res = vkCreatePipelineLayout(device, &pipeline_layout_create_info, NULL, &pipeline_layout);
+    res = vkCreatePipelineLayout(ctx->device, &pipeline_layout_create_info, NULL, &pipeline_layout);
     assert(res == VK_SUCCESS);
 
     VkComputePipelineCreateInfo pipeline_create_info = {
@@ -293,15 +191,15 @@ int main() {
         .layout = pipeline_layout,
     };
     VkPipeline pipeline;
-    res = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, NULL, &pipeline);
+    res = vkCreateComputePipelines(ctx->device, VK_NULL_HANDLE, 1, &pipeline_create_info, NULL, &pipeline);
     assert(res == VK_SUCCESS);
 
     VkCommandPoolCreateInfo cmd_pool_create_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .queueFamilyIndex = queue_index,
+        .queueFamilyIndex = ctx->queue_family_index,
     };
     VkCommandPool cmd_pool;
-    vkCreateCommandPool(device, &cmd_pool_create_info, NULL, &cmd_pool);
+    vkCreateCommandPool(ctx->device, &cmd_pool_create_info, NULL, &cmd_pool);
 
     VkCommandBufferAllocateInfo cmd_buffer_allocate_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -310,7 +208,7 @@ int main() {
         .commandBufferCount = 1,
     };
     VkCommandBuffer cmd_buffer;
-    vkAllocateCommandBuffers(device, &cmd_buffer_allocate_info, &cmd_buffer);
+    vkAllocateCommandBuffers(ctx->device, &cmd_buffer_allocate_info, &cmd_buffer);
 
     struct input_dim input_dim = {
         .width = 1920,
@@ -369,22 +267,24 @@ int main() {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
     };
     VkFence fence;
-    res = vkCreateFence(device, &fence_create_info, NULL, &fence);
+    res = vkCreateFence(ctx->device, &fence_create_info, NULL, &fence);
     assert(res == VK_SUCCESS);
 
-    res = vkQueueSubmit(queue, 1, &submit_info, fence);
+    res = vkQueueSubmit(ctx->queue, 1, &submit_info, fence);
     assert(res == VK_SUCCESS);
 
-    res = vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+    res = vkWaitForFences(ctx->device, 1, &fence, VK_TRUE, UINT64_MAX);
     assert(res == VK_SUCCESS);
 
-    vkDestroyFence(device, fence, NULL);
+    vkDestroyFence(ctx->device, fence, NULL);
 
     uint8_t *data;
-    res = vkMapMemory(device, host_memory, 0, buffer_size, 0, (void **) &data);
+    res = vkMapMemory(ctx->device, host_memory, 0, buffer_size, 0, (void **) &data);
     assert(res == VK_SUCCESS);
 
     FILE *file = fopen("buffer.bin", "wb");
     fwrite(data, buffer_size, 1, file);
     fclose(file);
+
+    /* TODO: call vulkan_ctx_destroy(ctx); */
 }
