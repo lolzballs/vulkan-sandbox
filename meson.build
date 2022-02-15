@@ -5,6 +5,7 @@ vulkandep = dependency('vulkan')
 sources = files([
   'src/sandbox.c',
   'src/vulkan/context.c',
+  'src/vulkan/memory.c',
 ])
 
 incdir = include_directories('include')

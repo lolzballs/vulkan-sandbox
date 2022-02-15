@@ -7,93 +7,29 @@
 
 #include "basic.comp.h"
 #include "vulkan/context.h"
+#include "vulkan/memory.h"
 
 struct input_dim {
     int32_t width;
     int32_t height;
 };
 
-static int32_t
-find_device_memory(VkPhysicalDevice physical_device, VkMemoryPropertyFlags properties) {
-    VkPhysicalDeviceMemoryProperties memory_properties;
-    vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
-
-    for (int32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
-        if (memory_properties.memoryTypes[i].propertyFlags & properties) {
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-static VkResult
-create_buffer(VkBuffer *buffer, VkDevice device,
-        VkDeviceSize size, VkBufferUsageFlags usage) {
-    VkBufferCreateInfo create_info = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = usage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-    };
-
-    return vkCreateBuffer(device, &create_info, NULL, buffer);
-}
-
 int main() {
     VkResult res = VK_ERROR_UNKNOWN;
 
-    struct vulkan_ctx *ctx = vulkan_ctx_create();
-
-    VkDeviceSize buffer_size = 1920 * 1080 * sizeof(uint32_t);
-    VkBuffer buffer;
-    res = create_buffer(&buffer, ctx->device, buffer_size,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-    assert(res == VK_SUCCESS);
-
-    VkMemoryRequirements memory_requirements;
-    vkGetBufferMemoryRequirements(ctx->device, buffer, &memory_requirements);
-
-    /* TODO: search for memory based on memory_requirements */
-    int32_t memory_index = find_device_memory(ctx->physical_device,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    assert(memory_index >= 0);
-
-    VkMemoryAllocateInfo allocate_info = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = memory_requirements.size,
-        .memoryTypeIndex = memory_index,
+    struct input_dim input_dim = {
+        .width = 1920,
+        .height = 1080,
     };
 
-    VkDeviceMemory memory;
-    res = vkAllocateMemory(ctx->device, &allocate_info, NULL, &memory);
-    assert(res == VK_SUCCESS);
+    VkDeviceSize buffer_size = input_dim.height * input_dim.width * sizeof(uint32_t);
 
-    res = vkBindBufferMemory(ctx->device, buffer, memory, 0);
-    assert(res == VK_SUCCESS);
+    struct vulkan_ctx *ctx = vulkan_ctx_create(buffer_size);
 
-    int32_t host_memory_index = find_device_memory(ctx->physical_device,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-    assert(host_memory_index >= 0);
-
-    /* allocate host memory for host buffer */
-    VkMemoryAllocateInfo host_allocate_info = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = memory_requirements.size,
-        .memoryTypeIndex = host_memory_index,
-    };
-
-    VkDeviceMemory host_memory;
-    res = vkAllocateMemory(ctx->device, &host_allocate_info, NULL, &host_memory);
-    assert(res == VK_SUCCESS);
-
-    VkBuffer host_buffer;
-    res = create_buffer(&host_buffer, ctx->device, buffer_size,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-    assert(res == VK_SUCCESS);
-
-    res = vkBindBufferMemory(ctx->device, host_buffer, host_memory, 0);
-    assert(res == VK_SUCCESS);
+    struct vulkan_buffer buffer_device;
+    vulkan_buffer_init(ctx, &buffer_device, VULKAN_BUFFER_TYPE_DEVICE_LOCAL, buffer_size);
+    struct vulkan_buffer buffer_host;
+    vulkan_buffer_init(ctx, &buffer_host, VULKAN_BUFFER_TYPE_HOST, buffer_size);
 
     VkDescriptorSetLayoutBinding dset_layout_binding = {
         .binding = 0,
@@ -137,7 +73,7 @@ int main() {
     assert(res == VK_SUCCESS);
 
     VkDescriptorBufferInfo descriptor_buffer_info = {
-        .buffer = buffer,
+        .buffer = buffer_device.buffer,
         .offset = 0,
         .range = buffer_size,
     };
@@ -210,11 +146,6 @@ int main() {
     VkCommandBuffer cmd_buffer;
     vkAllocateCommandBuffers(ctx->device, &cmd_buffer_allocate_info, &cmd_buffer);
 
-    struct input_dim input_dim = {
-        .width = 1920,
-        .height = 1080,
-    };
-
     VkCommandBufferBeginInfo cmd_buffer_begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
@@ -236,7 +167,7 @@ int main() {
         .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .buffer = buffer,
+        .buffer = buffer_device.buffer,
         .offset = 0,
         .size = VK_WHOLE_SIZE,
     };
@@ -252,7 +183,7 @@ int main() {
         .dstOffset = 0,
         .size = buffer_size,
     };
-    vkCmdCopyBuffer(cmd_buffer, buffer, host_buffer, 1, &buffer_copy);
+    vkCmdCopyBuffer(cmd_buffer, buffer_device.buffer, buffer_host.buffer, 1, &buffer_copy);
 
     res = vkEndCommandBuffer(cmd_buffer);
     assert(res == VK_SUCCESS);
@@ -279,12 +210,12 @@ int main() {
     vkDestroyFence(ctx->device, fence, NULL);
 
     uint8_t *data;
-    res = vkMapMemory(ctx->device, host_memory, 0, buffer_size, 0, (void **) &data);
+    res = vkMapMemory(ctx->device, buffer_host.memory, 0, buffer_size, 0, (void **) &data);
     assert(res == VK_SUCCESS);
 
     FILE *file = fopen("buffer.bin", "wb");
     fwrite(data, buffer_size, 1, file);
     fclose(file);
 
-    /* TODO: call vulkan_ctx_destroy(ctx); */
+    /* TODO: clean up ctx, buffers */
 }
