@@ -94,6 +94,14 @@ create_vulkan_device(struct vulkan_ctx *ini) {
         .pQueueCreateInfos = &queue_create_info,
     };
 
+    VkPhysicalDeviceVulkan12Features vulkan12_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .shaderInt8 = true,
+        .storageBuffer8BitAccess = true,
+    };
+
+    device_create_info.pNext = &vulkan12_features;
+
     VkResult res = VK_ERROR_UNKNOWN;
     res = vkCreateDevice(ini->physical_device, &device_create_info, NULL, &ini->device);
     if (res != VK_SUCCESS) {
