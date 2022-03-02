@@ -1,4 +1,4 @@
-vulkan_shaders_src = ['basic.comp']
+vulkan_shaders_src = ['basic.comp', 'psnr.comp']
 
 glslang = find_program('glslangValidator', native: true, required: true)
 
@@ -6,7 +6,7 @@ vulkan_shaders = []
 
 foreach shader : vulkan_shaders_src
   name = shader.underscorify() + '_data'
-  args = [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@', '--vn', name]
+  args = [glslang, '--target-env', 'vulkan1.2', '-V', '@INPUT@', '-o', '@OUTPUT@', '--vn', name]
   header = custom_target(
       shader + '_spv',
       output: shader + '.h',

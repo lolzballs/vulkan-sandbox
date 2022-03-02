@@ -1,0 +1,32 @@
+#version 460
+
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(push_constant) uniform dim_t {
+    int width;
+    int height;
+} dim;
+
+layout(binding = 0) buffer reference_yuv {
+    readonly int8_t reference[];
+};
+
+layout(binding = 1) buffer distorted_yuv {
+    readonly int8_t distorted[];
+};;
+
+layout(binding = 2) buffer out_psnr {
+    int32_t mse;
+};
+
+void main() {
+    if (gl_GlobalInvocationID.x >= dim.width || gl_GlobalInvocationID.y >= dim.height) {
+        return;
+    }
+
+    uint pos = gl_GlobalInvocationID.y * dim.width + gl_GlobalInvocationID.x;
+    int error = reference[pos] - distorted[pos];
+    atomicAdd(mse, error * error);
+}
