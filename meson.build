@@ -7,8 +7,10 @@ libxcb_dep = dependency('xcb')
 sources = files([
   'src/main.c',
   'src/window.c',
+  'src/vulkan.c',
 ])
 
+add_global_arguments('-DVK_USE_PLATFORM_XCB_KHR', language : 'c')
 executable('player', sources,
   dependencies: [
     vulkandep,
