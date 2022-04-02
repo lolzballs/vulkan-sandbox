@@ -90,12 +90,21 @@ window_poll_event(struct window *window) {
 	xcb_generic_event_t *event;
 	while ((event = xcb_poll_for_event(window->xcb_connection)) != NULL) {
 		switch (event->response_type & 0x7F) {
-			case XCB_CLIENT_MESSAGE:
+			case XCB_CONFIGURE_NOTIFY: {
+				xcb_configure_notify_event_t *resize_event =
+					(xcb_configure_notify_event_t *) event;
+				window->width = resize_event->width;
+				window->height = resize_event->height;
+				window->resized = true;
+			}
+			case XCB_CLIENT_MESSAGE: {
 				xcb_client_message_event_t *client_event =
 					(xcb_client_message_event_t *) event;
 				if (client_event->data.data32[0] == window->atom_delete_window) {
 					window->close_requested = true;
 				}
+				break;
+			}
 			default:
 				printf("unknown event: %d\n", event->response_type);
 		}
