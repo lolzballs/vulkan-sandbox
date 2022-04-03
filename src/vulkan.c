@@ -163,3 +163,36 @@ vulkan_ctx_destroy(struct vulkan_ctx *ctx) {
     free(ctx);
     ctx = NULL;
 }
+
+VkResult
+vulkan_ctx_create_fence(struct vulkan_ctx *ctx, VkFence *fence, bool init) {
+	VkFenceCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		.flags = init ? VK_FENCE_CREATE_SIGNALED_BIT : 0,
+	};
+	return vkCreateFence(ctx->device, &create_info, NULL, fence);
+}
+
+VkResult
+vulkan_ctx_create_semaphore(struct vulkan_ctx *ctx, VkSemaphore *semaphore) {
+	VkSemaphoreTypeCreateInfo type_info = {
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+		.semaphoreType = VK_SEMAPHORE_TYPE_BINARY,
+	};
+	VkSemaphoreCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		.pNext = &type_info,
+	};
+	return vkCreateSemaphore(ctx->device, &create_info, NULL, semaphore);
+}
+
+VkResult
+vulkan_ctx_create_cmd_pool(struct vulkan_ctx *ctx, VkCommandPool *cmd_pool,
+		VkCommandPoolCreateFlags flags) {
+	VkCommandPoolCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		.flags = flags,
+		.queueFamilyIndex = ctx->queue_family_index,
+	};
+	return vkCreateCommandPool(ctx->device, &create_info, NULL, cmd_pool);
+}
