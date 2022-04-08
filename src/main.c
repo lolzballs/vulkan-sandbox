@@ -9,6 +9,18 @@
 #define RENDER_FORMAT VK_FORMAT_B8G8R8A8_UNORM
 
 static VkResult
+create_command_buffer(struct vulkan_ctx *vk, VkCommandPool pool,
+		VkCommandBuffer *cmd_buffer) {
+	VkCommandBufferAllocateInfo info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandPool = pool,
+		.commandBufferCount = 1,
+	};
+	return vkAllocateCommandBuffers(vk->device, &info, cmd_buffer);
+}
+
+static VkResult
 create_renderpass(struct vulkan_ctx *vk, VkRenderPass *render_pass) {
 	VkAttachmentDescription attachment_desc = {
 		.flags = 0,
@@ -84,6 +96,9 @@ static VkResult
 create_swapchain(struct vulkan_ctx *vk, VkSurfaceKHR surface,
 		VkRenderPass render_pass, struct swapchain *swapchain) {
 	VkResult res = VK_SUCCESS;
+
+	res = vkDeviceWaitIdle(vk->device);
+	assert(res == VK_SUCCESS);
 
 	uint32_t nformats = 16;
 	VkSurfaceFormatKHR surface_formats[16];
@@ -196,50 +211,209 @@ create_swapchain(struct vulkan_ctx *vk, VkSurfaceKHR surface,
 	return res;
 }
 
-int main() {
-	struct vulkan_ctx *vk = vulkan_ctx_create();
-	struct window *window = window_create();
+struct app {
+	struct window *window;
+	struct vulkan_ctx *vk;
 
-	VkResult res;
+	VkSurfaceKHR surface;
+	VkRenderPass render_pass;
+	struct swapchain swapchain;
+
+	VkCommandPool cmd_pool;
+	VkCommandBuffer cmd;
+
+	VkSemaphore image_acquisition_semaphore;
+	VkSemaphore rendering_semaphore;
+	VkFence inflight_fence;
+};
+
+static VkResult
+acquire_next_image(struct app *app, uint32_t *image_ind) {
+	VkResult res = VK_TIMEOUT;
+	while (res == VK_NOT_READY || res == VK_TIMEOUT) {
+		res = vkAcquireNextImageKHR(app->vk->device, app->swapchain.vk_swapchain,
+			30, app->image_acquisition_semaphore, NULL, image_ind);
+	}
+	return res;
+}
+
+static VkResult
+build_cmd_buffer_for_fb(struct app *app, VkCommandBuffer cmd, VkFramebuffer fb) {
+	VkResult res = VK_SUCCESS;
+
+	res = vkResetCommandBuffer(cmd, 0);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	VkCommandBufferBeginInfo cmd_begin_info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	};
+	res = vkBeginCommandBuffer(cmd, &cmd_begin_info);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	VkClearValue clear_value = {
+		.color = {
+			.float32 = { 1.0f, 0, 1.0f, 1.0f },
+		}
+	};
+	VkRenderPassBeginInfo begin_info = {
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.renderPass = app->render_pass,
+		.framebuffer = fb,
+		.renderArea = {
+			.extent = app->swapchain.extent,
+			.offset = { 0, 0 },
+		},
+		.clearValueCount = 1,
+		.pClearValues = &clear_value,
+	};
+	vkCmdBeginRenderPass(cmd, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdEndRenderPass(cmd);
+
+	res = vkEndCommandBuffer(cmd);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	return VK_SUCCESS;
+}
+
+static void
+app_render(struct app *app) {
+	struct vulkan_ctx *vk = app->vk;
+	VkResult res = VK_SUCCESS;
+
+	res = vkWaitForFences(vk->device, 1, &app->inflight_fence, VK_TRUE, UINT64_MAX);
+	assert(res == VK_SUCCESS);
+	res = vkResetFences(vk->device, 1, &app->inflight_fence);
+	assert(res == VK_SUCCESS);
+
+	uint32_t image_ind = 0;
+	res = acquire_next_image(app, &image_ind);
+	if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+		return;
+	}
+	assert(res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR);
+
+	res = build_cmd_buffer_for_fb(app, app->cmd, app->swapchain.images[image_ind].framebuffer);
+	assert(res == VK_SUCCESS);
+
+	VkPipelineStageFlags dst_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	VkSubmitInfo submit_info = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &app->image_acquisition_semaphore,
+		.pWaitDstStageMask = &dst_stage_mask,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &app->cmd,
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &app->rendering_semaphore,
+	};
+	vkQueueSubmit(vk->queue, 1, &submit_info, app->inflight_fence);
+
+	VkPresentInfoKHR present_info = {
+		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &app->rendering_semaphore,
+		.swapchainCount = 1,
+		.pSwapchains = &app->swapchain.vk_swapchain,
+		.pImageIndices = &image_ind,
+		.pResults = NULL,
+	};
+	res = vkQueuePresentKHR(vk->queue, &present_info);
+}
+
+void
+app_init(struct app *ini) {
+	struct vulkan_ctx *vk = vulkan_ctx_create();
+	ini->vk = vk;
+	struct window *window = window_create();
+	ini->window = window;
+
+	VkResult res = VK_SUCCESS;
 
 	VkXcbSurfaceCreateInfoKHR xcb_surface_create_info = {
 		.sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
 		.connection = window->xcb_connection,
 		.window = window->window_id,
 	};
-	VkSurfaceKHR surface;
-	res = vkCreateXcbSurfaceKHR(vk->instance, &xcb_surface_create_info, NULL, &surface);
+	res = vkCreateXcbSurfaceKHR(vk->instance, &xcb_surface_create_info, NULL, &ini->surface);
 	assert(res == VK_SUCCESS);
 
-	VkRenderPass render_pass;
-	res = create_renderpass(vk, &render_pass);
+	res = create_renderpass(vk, &ini->render_pass);
 	assert(res == VK_SUCCESS);
 
-	struct swapchain swapchain = { 0 };
-	res = create_swapchain(vk, surface, render_pass, &swapchain);
+	res = create_swapchain(vk, ini->surface, ini->render_pass, &ini->swapchain);
 	assert(res == VK_SUCCESS);
+
+	res = vulkan_ctx_create_semaphore(vk, &ini->image_acquisition_semaphore);
+	assert(res == VK_SUCCESS);
+
+	res = vulkan_ctx_create_semaphore(vk, &ini->rendering_semaphore);
+	assert(res == VK_SUCCESS);
+
+	res = vulkan_ctx_create_fence(vk, &ini->inflight_fence, true);
+	assert(res == VK_SUCCESS);
+
+	res = vulkan_ctx_create_cmd_pool(vk, &ini->cmd_pool,
+			VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+	assert(res == VK_SUCCESS);
+
+	res = create_command_buffer(vk, ini->cmd_pool, &ini->cmd);
+	assert(res == VK_SUCCESS);
+}
+
+void
+app_finish(struct app *app) {
+	vkDestroyFence(app->vk->device, app->inflight_fence, NULL);
+	vkDestroySemaphore(app->vk->device, app->rendering_semaphore, NULL);
+	vkDestroySemaphore(app->vk->device, app->image_acquisition_semaphore, NULL);
+
+	vkFreeCommandBuffers(app->vk->device, app->cmd_pool, 1, &app->cmd);
+	vkDestroyCommandPool(app->vk->device, app->cmd_pool, NULL);
+
+	destroy_swapchain_related_resources(app->vk, &app->swapchain);
+	vkDestroySwapchainKHR(app->vk->device, app->swapchain.vk_swapchain, NULL);
+
+	vkDestroyRenderPass(app->vk->device, app->render_pass, NULL);
+	vkDestroySurfaceKHR(app->vk->instance, app->surface, NULL);
+
+	window_destroy(app->window);
+	vulkan_ctx_destroy(app->vk);
+}
+
+void
+app_run(struct app *app) {
+	struct window *window = app->window;
+	struct vulkan_ctx *vk = app->vk;
 
 	window_show(window);
+
+	VkResult res = VK_SUCCESS;
 
 	while (!window->close_requested) {
 		window_poll_event(window);
 
 		/* recreate swapchain on resize */
 		if (window->resized) {
-			res = create_swapchain(vk, surface, render_pass, &swapchain);
+			res = create_swapchain(vk, app->surface, app->render_pass, &app->swapchain);
 			assert(res == VK_SUCCESS);
 			window->resized = false;
 		}
+
+		app_render(app);
 	}
 
 	vkDeviceWaitIdle(vk->device);
+}
 
-	destroy_swapchain_related_resources(vk, &swapchain);
-	vkDestroySwapchainKHR(vk->device, swapchain.vk_swapchain, NULL);
+int main() {
+	struct app app = { 0 };
 
-	vkDestroyRenderPass(vk->device, render_pass, NULL);
-	vkDestroySurfaceKHR(vk->instance, surface, NULL);
-
-	window_destroy(window);
-	vulkan_ctx_destroy(vk);
+	app_init(&app);
+	app_run(&app);
+	app_finish(&app);
 }
