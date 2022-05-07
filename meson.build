@@ -5,6 +5,7 @@ libdrm_dep = dependency('libdrm')
 libxcb_dep = dependency('xcb')
 
 sources = files([
+  'src/image.c',
   'src/main.c',
   'src/window.c',
   'src/vulkan.c',
