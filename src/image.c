@@ -266,3 +266,64 @@ image_finish(struct image *image, struct vulkan_ctx *vk) {
 		vkFreeMemory(vk->device, image->vk_memories[plane], NULL);
 	}
 }
+
+VkResult image_sampler_init(struct image_sampler *ini, struct vulkan_ctx *vk,
+		enum image_format format) {
+	VkResult res;
+
+	VkSamplerYcbcrConversion ycbcr_conversion;
+	VkSamplerYcbcrConversionCreateInfo ycbcr_conversion_create = {
+		.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO,
+		.format = image_format_to_vk_format(format),
+		.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
+		.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_FULL,
+		.xChromaOffset = VK_CHROMA_LOCATION_MIDPOINT,
+		.yChromaOffset = VK_CHROMA_LOCATION_MIDPOINT,
+		.chromaFilter = VK_FILTER_NEAREST,
+	};
+	res = vkCreateSamplerYcbcrConversion(vk->device, &ycbcr_conversion_create,
+			NULL, &ycbcr_conversion);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	VkSampler sampler;
+	VkSamplerYcbcrConversionInfo ycbcr_info = {
+		.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO,
+		.conversion = ycbcr_conversion,
+	};
+	VkSamplerCreateInfo sampler_create = {
+		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+		.pNext = &ycbcr_info,
+		.magFilter = VK_FILTER_NEAREST,
+		.minFilter = VK_FILTER_NEAREST,
+		.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+		.anisotropyEnable = VK_FALSE,
+		.compareEnable = VK_FALSE,
+		.minLod = 0.0f,
+		.maxLod = 0.0f,
+		.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
+		.unnormalizedCoordinates = VK_FALSE,
+	};
+	res = vkCreateSampler(vk->device, &sampler_create, NULL, &sampler);
+	if (res != VK_SUCCESS) {
+		vkDestroySamplerYcbcrConversion(vk->device, ycbcr_conversion, NULL);
+		return res;
+	}
+
+	ini->format = format;
+	ini->conversion = ycbcr_conversion;
+	ini->sampler = sampler;
+	return VK_SUCCESS;
+}
+
+void
+image_sampler_finish(struct image_sampler *sampler, struct vulkan_ctx *vk) {
+	vkDestroySampler(vk->device, sampler->sampler, NULL);
+	sampler->sampler = VK_NULL_HANDLE;
+	vkDestroySamplerYcbcrConversion(vk->device, sampler->conversion, NULL);
+	sampler->conversion = VK_NULL_HANDLE;
+}
