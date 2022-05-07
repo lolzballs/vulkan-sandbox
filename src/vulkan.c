@@ -19,7 +19,17 @@ find_unified_queue(VkPhysicalDevice device) {
         }
     }
     return candidate;
+}
 
+static uint32_t
+find_memory_index(VkPhysicalDeviceMemoryProperties *memory_properties,
+		VkMemoryPropertyFlags flags) {
+	for (uint32_t i = 0; i < memory_properties->memoryTypeCount; i++) {
+		if (memory_properties->memoryTypes[i].propertyFlags & flags) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 static VkResult
@@ -145,6 +155,12 @@ vulkan_ctx_create() {
 
     res = create_vulkan_device(ini);
     assert(res == VK_SUCCESS);
+
+	vkGetPhysicalDeviceMemoryProperties(ini->physical_device, &ini->memory_properties);
+	ini->device_local_memory_index = find_memory_index(&ini->memory_properties,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	ini->host_visible_memory_index = find_memory_index(&ini->memory_properties,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
     return ini;
 }
