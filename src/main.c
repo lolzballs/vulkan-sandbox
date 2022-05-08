@@ -1,10 +1,10 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vulkan/vulkan_core.h>
 
+#include "image.h"
+#include "pipeline.h"
 #include "window.h"
-#include "vulkan.h"
 
 #define RENDER_FORMAT VK_FORMAT_B8G8R8A8_UNORM
 
@@ -63,6 +63,167 @@ create_renderpass(struct vulkan_ctx *vk, VkRenderPass *render_pass) {
 		.pDependencies = NULL,
 	};
 	return vkCreateRenderPass(vk->device, &create, NULL, render_pass);
+}
+
+static VkResult
+create_descriptor_pool(struct vulkan_ctx *vk, VkDescriptorPool *descriptor_pool) {
+	VkDescriptorPoolCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.poolSizeCount = 1,
+		.pPoolSizes = (VkDescriptorPoolSize[]) {
+			{
+				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+			},
+		},
+		.maxSets = 1,
+	};
+	return vkCreateDescriptorPool(vk->device, &create_info, NULL, descriptor_pool);
+}
+
+static VkResult
+create_descriptor_set_layout(struct vulkan_ctx *vk, VkDescriptorSetLayout *layout,
+		VkSampler sampler) {
+	VkDescriptorSetLayoutCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.bindingCount = 1,
+		.pBindings = (VkDescriptorSetLayoutBinding[]) {
+			{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.pImmutableSamplers = (VkSampler[]) { sampler },
+			}
+		},
+	};
+	return vkCreateDescriptorSetLayout(vk->device, &create_info, NULL, layout);
+}
+
+static VkResult
+allocate_descriptor_set(struct vulkan_ctx *vk, VkDescriptorSet *set,
+		VkDescriptorPool pool, VkDescriptorSetLayout layout) {
+	VkDescriptorSetAllocateInfo alloc_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.descriptorPool = pool,
+		.descriptorSetCount = 1,
+		.pSetLayouts = &layout,
+	};
+	return vkAllocateDescriptorSets(vk->device, &alloc_info, set);
+}
+
+static VkResult
+create_image_view(struct vulkan_ctx *vk, VkImageView *image_view,
+		const struct image *image, const struct image_sampler *sampler) {
+	VkSamplerYcbcrConversionInfo conversion_info = {
+		.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO,
+		.pNext = NULL,
+		.conversion = sampler->conversion,
+	};
+	VkImageViewCreateInfo image_view_create = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+		.pNext = &conversion_info,
+		.image = image->vk_image,
+		.viewType = VK_IMAGE_VIEW_TYPE_2D,
+		.format = image_format_to_vk_format(image->format),
+		.components = {
+			.r = VK_COMPONENT_SWIZZLE_R,
+			.g = VK_COMPONENT_SWIZZLE_G,
+			.b = VK_COMPONENT_SWIZZLE_B,
+			.a = VK_COMPONENT_SWIZZLE_A,
+		},
+		.subresourceRange = {
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1,
+		},
+	};
+	return vkCreateImageView(vk->device, &image_view_create, NULL, image_view);
+}
+
+static VkResult
+transition_image_layout(struct vulkan_ctx *vk, VkCommandPool cmd_pool,
+		VkImage image) {
+	VkResult res;
+
+	VkCommandBuffer temp_buf;
+	res = create_command_buffer(vk, cmd_pool, &temp_buf);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	VkCommandBufferBeginInfo begin_info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+	res = vkBeginCommandBuffer(temp_buf, &begin_info);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	VkImageMemoryBarrier image_memory_barrier = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		.srcAccessMask = 0,
+		.dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+		.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = image,
+		.subresourceRange = (VkImageSubresourceRange) {
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1,
+		},
+	};
+	vkCmdPipelineBarrier(temp_buf,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+			0, NULL,
+			0, NULL,
+			1, &image_memory_barrier);
+
+	vkEndCommandBuffer(temp_buf);
+
+	VkSubmitInfo submit_info = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &temp_buf,
+	};
+	res = vkQueueSubmit(vk->queue, 1, &submit_info, NULL);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	res = vkQueueWaitIdle(vk->queue);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+	
+	vkFreeCommandBuffers(vk->device, cmd_pool, 1, &temp_buf);
+	return VK_SUCCESS;
+}
+
+static void
+update_descriptor_with_image(struct vulkan_ctx *vk, VkDescriptorSet descriptor,
+		VkSampler sampler, VkImageView image_view) {
+	VkWriteDescriptorSet descriptor_write = {
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.dstSet = descriptor,
+		.dstBinding = 0,
+		.dstArrayElement = 0,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		.pImageInfo = &(VkDescriptorImageInfo) {
+				.sampler = sampler,
+				.imageView = image_view,
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		},
+	};
+	vkUpdateDescriptorSets(vk->device, 1, &descriptor_write, 0, NULL);
 }
 
 struct swapchain_image {
@@ -225,6 +386,16 @@ struct app {
 	VkSemaphore image_acquisition_semaphore;
 	VkSemaphore rendering_semaphore;
 	VkFence inflight_fence;
+
+	struct image_sampler sampler;
+	struct image image;
+	VkImageView image_view;
+
+	VkDescriptorPool descriptor_pool;
+	VkDescriptorSetLayout descriptor_set_layout;
+	VkDescriptorSet descriptor_set;
+
+	struct graphics_pipeline pipeline;
 };
 
 static VkResult
@@ -271,6 +442,26 @@ build_cmd_buffer_for_fb(struct app *app, VkCommandBuffer cmd, VkFramebuffer fb) 
 		.pClearValues = &clear_value,
 	};
 	vkCmdBeginRenderPass(cmd, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+			app->pipeline.pipeline_layout, 0,
+			1, &app->descriptor_set,
+			0, NULL);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipeline.pipeline);
+
+	VkViewport viewport = {
+		.x = 0,
+		.y = 0,
+		.width = app->swapchain.extent.width,
+		.height = app->swapchain.extent.height,
+	};
+	vkCmdSetViewport(cmd, 0, 1, &viewport);
+	VkRect2D scissor = {
+		.offset = { 0 },
+		.extent = app->swapchain.extent,
+	};
+	vkCmdSetScissor(cmd, 0, 1, &scissor);
+	
+	vkCmdDraw(cmd, 6, 1, 0, 0);
 	vkCmdEndRenderPass(cmd);
 
 	res = vkEndCommandBuffer(cmd);
@@ -364,10 +555,49 @@ app_init(struct app *ini) {
 
 	res = create_command_buffer(vk, ini->cmd_pool, &ini->cmd);
 	assert(res == VK_SUCCESS);
+
+	res = image_init_from_file(&ini->image, vk, "data/CSGO_nv12.bin", 1920, 1080,
+			IMAGE_FORMAT_NV12, false);
+	assert(res == VK_SUCCESS);
+
+	res = image_sampler_init(&ini->sampler, vk, IMAGE_FORMAT_NV12);
+	assert(res == VK_SUCCESS);
+
+	res = create_image_view(vk, &ini->image_view, &ini->image, &ini->sampler);
+	assert(res == VK_SUCCESS);
+	res = transition_image_layout(vk, ini->cmd_pool, ini->image.vk_image);
+	assert(res == VK_SUCCESS);
+
+	res = create_descriptor_pool(vk, &ini->descriptor_pool);
+	assert(res == VK_SUCCESS);
+
+	res = create_descriptor_set_layout(vk, &ini->descriptor_set_layout,
+			ini->sampler.sampler);
+	assert(res == VK_SUCCESS);
+
+	res = allocate_descriptor_set(vk, &ini->descriptor_set,
+			ini->descriptor_pool, ini->descriptor_set_layout);
+	assert(res == VK_SUCCESS);
+
+	update_descriptor_with_image(vk, ini->descriptor_set, ini->sampler.sampler,
+			ini->image_view);
+
+	res = graphics_pipeline_init(&ini->pipeline, vk,
+			ini->descriptor_set_layout, ini->render_pass);
+	assert(res == VK_SUCCESS);
 }
 
 void
 app_finish(struct app *app) {
+	graphics_pipeline_finish(&app->pipeline, app->vk);
+
+	vkDestroyDescriptorSetLayout(app->vk->device, app->descriptor_set_layout, NULL);
+	vkDestroyDescriptorPool(app->vk->device, app->descriptor_pool, NULL);
+
+	vkDestroyImageView(app->vk->device, app->image_view, NULL);
+	image_finish(&app->image, app->vk);
+	image_sampler_finish(&app->sampler, app->vk);
+
 	vkDestroyFence(app->vk->device, app->inflight_fence, NULL);
 	vkDestroySemaphore(app->vk->device, app->rendering_semaphore, NULL);
 	vkDestroySemaphore(app->vk->device, app->image_acquisition_semaphore, NULL);
