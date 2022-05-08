@@ -24,5 +24,7 @@ VkResult vulkan_ctx_create_fence(struct vulkan_ctx *ctx, VkFence *fence, bool in
 VkResult vulkan_ctx_create_semaphore(struct vulkan_ctx *ctx, VkSemaphore *semaphore);
 VkResult vulkan_ctx_create_cmd_pool(struct vulkan_ctx *ctx, VkCommandPool *cmd_pool,
 		VkCommandPoolCreateFlags flags);
+VkResult vulkan_ctx_create_shader_module(struct vulkan_ctx *ctx,
+		VkShaderModule *shader_module, size_t code_size, const void *code);
 
 #endif

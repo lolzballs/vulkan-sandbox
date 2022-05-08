@@ -212,3 +212,14 @@ vulkan_ctx_create_cmd_pool(struct vulkan_ctx *ctx, VkCommandPool *cmd_pool,
 	};
 	return vkCreateCommandPool(ctx->device, &create_info, NULL, cmd_pool);
 }
+
+VkResult
+vulkan_ctx_create_shader_module(struct vulkan_ctx *ctx,
+		VkShaderModule *shader_module, size_t code_size, const void *code) {
+	VkShaderModuleCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+		.codeSize = code_size,
+		.pCode = code,
+	};
+	return vkCreateShaderModule(ctx->device, &create_info, NULL, shader_module);
+}
