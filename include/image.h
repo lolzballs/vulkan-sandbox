@@ -6,7 +6,7 @@
 enum image_format {
 	IMAGE_FORMAT_YU12,
 	IMAGE_FORMAT_NV12,
-	IMAGE_FORMAT_P420,
+	IMAGE_FORMAT_422P,
 };
 
 static VkFormat
@@ -16,7 +16,7 @@ image_format_to_vk_format(enum image_format format) {
 			return VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
 		case IMAGE_FORMAT_NV12:
 			return VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
-		case IMAGE_FORMAT_P420:
+		case IMAGE_FORMAT_422P:
 			return VK_FORMAT_G8_B8_R8_3PLANE_422_UNORM;
 	}
 	return VK_FORMAT_UNDEFINED;
@@ -29,7 +29,7 @@ image_format_plane_count(enum image_format format) {
 			return 3;
 		case IMAGE_FORMAT_NV12:
 			return 2;
-		case IMAGE_FORMAT_P420:
+		case IMAGE_FORMAT_422P:
 			return 3;
 	}
 	return -1;
@@ -42,7 +42,7 @@ image_format_size(enum image_format format, uint32_t width, uint32_t height) {
 			return width * height * 3 / 2;
 		case IMAGE_FORMAT_NV12:
 			return width * height * 3 / 2;
-		case IMAGE_FORMAT_P420:
+		case IMAGE_FORMAT_422P:
 			return width * height * 2;
 	}
 	return -1;
@@ -54,7 +54,7 @@ image_format_plane_size(enum image_format format,
 		uint32_t *plane_width, uint32_t *plane_height, uint32_t plane) {
 	static uint32_t ratio_yu12[3][2] = { { 1, 1 }, { 2, 2 }, { 2, 2 } };
 	static uint32_t ratio_nv12[3][2] = { { 1, 1 }, { 1, 2 } };
-	static uint32_t ratio_422p[3][2] = { { 1, 1 }, { 2, 1 }, { 2, 1} };
+	static uint32_t ratio_422p[3][2] = { { 1, 1 }, { 2, 1 }, { 2, 1 } };
 
 	switch (format) {
 		case IMAGE_FORMAT_YU12:
@@ -65,7 +65,7 @@ image_format_plane_size(enum image_format format,
 			*plane_width = base_width / ratio_nv12[plane][0];
 			*plane_height = base_height / ratio_nv12[plane][1];
 			break;
-		case IMAGE_FORMAT_P420:
+		case IMAGE_FORMAT_422P:
 			*plane_width = base_width / ratio_422p[plane][0];
 			*plane_height = base_height / ratio_422p[plane][1];
 			break;
