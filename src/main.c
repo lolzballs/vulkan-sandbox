@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "image.h"
 #include "pipeline.h"
@@ -372,6 +374,62 @@ create_swapchain(struct vulkan_ctx *vk, VkSurfaceKHR surface,
 	return res;
 }
 
+struct app_params {
+	uint32_t width;
+	uint32_t height;
+	enum image_format format;
+	char *image_path;
+};
+
+static void
+parse_args(struct app_params *params, int argc, char *argv[]) {
+	params->width = -1;
+	params->height = -1;
+	params->format = -1;
+
+	int opt;
+	while ((opt = getopt(argc, argv, "w:h:f:")) != -1) {
+		switch (opt) {
+			case 'w':
+				params->width = atoi(optarg);
+				break;
+			case 'h':
+				params->height = atoi(optarg);
+				break;
+			case 'f':
+				if (strcmp(optarg, "nv12") == 0) {
+					params->format = IMAGE_FORMAT_NV12;
+				} else if (strcmp(optarg, "yu12") == 0) {
+					params->format = IMAGE_FORMAT_YU12;
+				} else if (strcmp(optarg, "422p") == 0) {
+					params->format = IMAGE_FORMAT_422P;
+				} else {
+					fprintf(stderr, "%s is not a supported format.\n"
+							"supported formats are:\n"
+							" - nv12\n"
+							" - yu12\n"
+							" - 422p\n", optarg);
+					exit(EXIT_FAILURE);
+				}
+				break;
+			default:
+				goto fail;
+		}
+	}
+
+	if (optind >= argc) {
+		goto fail;
+	}
+
+	params->image_path = argv[optind];
+	return;
+
+fail:
+	fprintf(stderr, "usage: %s [-w width] [-h height] [-f format] "
+			"file\n", argv[0]);
+	exit(EXIT_FAILURE);
+}
+
 struct app {
 	struct window *window;
 	struct vulkan_ctx *vk;
@@ -518,7 +576,7 @@ app_render(struct app *app) {
 }
 
 void
-app_init(struct app *ini) {
+app_init(struct app *ini, struct app_params *params) {
 	struct vulkan_ctx *vk = vulkan_ctx_create();
 	ini->vk = vk;
 	struct window *window = window_create();
@@ -556,11 +614,11 @@ app_init(struct app *ini) {
 	res = create_command_buffer(vk, ini->cmd_pool, &ini->cmd);
 	assert(res == VK_SUCCESS);
 
-	res = image_init_from_file(&ini->image, vk, "data/CSGO_nv12.bin", 1920, 1080,
-			IMAGE_FORMAT_NV12, false);
+	res = image_init_from_file(&ini->image, vk, params->image_path,
+			params->width, params->height, params->format, false);
 	assert(res == VK_SUCCESS);
 
-	res = image_sampler_init(&ini->sampler, vk, IMAGE_FORMAT_NV12);
+	res = image_sampler_init(&ini->sampler, vk, params->format);
 	assert(res == VK_SUCCESS);
 
 	res = create_image_view(vk, &ini->image_view, &ini->image, &ini->sampler);
@@ -640,10 +698,12 @@ app_run(struct app *app) {
 	vkDeviceWaitIdle(vk->device);
 }
 
-int main() {
+int main(int argc, char *argv[]) {
 	struct app app = { 0 };
+	struct app_params params;
+	parse_args(&params, argc, argv);
 
-	app_init(&app);
+	app_init(&app, &params);
 	app_run(&app);
 	app_finish(&app);
 }
