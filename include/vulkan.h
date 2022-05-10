@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <vulkan/vulkan.h>
 
+struct vulkan_ctx_features {
+	bool enable_ycbcr_conversion;
+};
+
 struct vulkan_ctx {
     VkInstance instance;
     VkPhysicalDevice physical_device;
@@ -17,7 +21,7 @@ struct vulkan_ctx {
 	uint32_t device_local_memory_index;
 };
 
-struct vulkan_ctx *vulkan_ctx_create();
+struct vulkan_ctx *vulkan_ctx_create(struct vulkan_ctx_features *features);
 void vulkan_ctx_destroy(struct vulkan_ctx *ctx);
 
 VkResult vulkan_ctx_create_fence(struct vulkan_ctx *ctx, VkFence *fence, bool init);

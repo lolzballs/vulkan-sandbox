@@ -577,7 +577,10 @@ app_render(struct app *app) {
 
 void
 app_init(struct app *ini, struct app_params *params) {
-	struct vulkan_ctx *vk = vulkan_ctx_create();
+	struct vulkan_ctx_features features = {
+		.enable_ycbcr_conversion = true,
+	};
+	struct vulkan_ctx *vk = vulkan_ctx_create(&features);
 	ini->vk = vk;
 	struct window *window = window_create();
 	ini->window = window;

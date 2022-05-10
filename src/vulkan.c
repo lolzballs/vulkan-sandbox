@@ -90,7 +90,7 @@ create_vulkan_instance(VkInstance *instance) {
 }
 
 static VkResult
-create_vulkan_device(struct vulkan_ctx *ini) {
+create_vulkan_device(struct vulkan_ctx *ini, struct vulkan_ctx_features *features) {
     int32_t queue_index = find_unified_queue(ini->physical_device);
     float queue_priority = 1.0;
     assert(queue_index >= 0);
@@ -114,13 +114,12 @@ create_vulkan_device(struct vulkan_ctx *ini) {
 		.ppEnabledExtensionNames = extensions,
     };
 
-    VkPhysicalDeviceVulkan12Features vulkan12_features = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-        .shaderInt8 = true,
-        .storageBuffer8BitAccess = true,
-    };
+	VkPhysicalDeviceVulkan11Features vulkan11_features = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+		.samplerYcbcrConversion = features && features->enable_ycbcr_conversion,
+	};
 
-    device_create_info.pNext = &vulkan12_features;
+    device_create_info.pNext = &vulkan11_features;
 
     VkResult res = VK_ERROR_UNKNOWN;
     res = vkCreateDevice(ini->physical_device, &device_create_info, NULL, &ini->device);
@@ -133,7 +132,7 @@ create_vulkan_device(struct vulkan_ctx *ini) {
 }
 
 struct vulkan_ctx *
-vulkan_ctx_create() {
+vulkan_ctx_create(struct vulkan_ctx_features *features) {
     VkResult res = VK_ERROR_UNKNOWN;
 
     struct vulkan_ctx *ini = calloc(1, sizeof(struct vulkan_ctx));
@@ -153,7 +152,7 @@ vulkan_ctx_create() {
     vkGetPhysicalDeviceProperties(ini->physical_device, &physical_device_properties);
     printf("using physical device 0: %s\n", physical_device_properties.deviceName);
 
-    res = create_vulkan_device(ini);
+    res = create_vulkan_device(ini, features);
     assert(res == VK_SUCCESS);
 
 	vkGetPhysicalDeviceMemoryProperties(ini->physical_device, &ini->memory_properties);
