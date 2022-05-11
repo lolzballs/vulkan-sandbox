@@ -99,6 +99,8 @@ get_plane_memory_requirements(struct vulkan_ctx *vk, VkImage image,
 		.pNext = &plane_info,
 		.image = image,
 	};
+	requirements->sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+	requirements->pNext = NULL;
 	vkGetImageMemoryRequirements2(vk->device, &info, requirements);
 }
 
@@ -179,7 +181,8 @@ image_init_from_memory(struct image *ini, struct vulkan_ctx *vk,
 	if (disjoint) {
 		size_t mem_offset = 0;
 		for (uint32_t plane = 0; plane < plane_count; plane++) {
-			get_plane_memory_requirements(vk, image, plane, &requirements);
+			get_plane_memory_requirements(vk, image,
+					plane_aspects[plane], &requirements);
 			res = allocate_memory_with_requirements(vk,
 					requirements.memoryRequirements, &memories[plane]);
 			assert(res == VK_SUCCESS);
