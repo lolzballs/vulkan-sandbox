@@ -90,9 +90,6 @@ VkResult image_init_from_memory(struct image *ini, struct vulkan_ctx *vk,
 		enum image_format format, bool disjoint);
 void image_finish(struct image *image, struct vulkan_ctx *vk);
 
-VkResult image_create_sampler(struct image *image, struct vulkan_ctx *vk,
-		VkSamplerYcbcrConversion *ycbcr_conversion, VkSampler *sampler);
-
 struct image_sampler {
 	enum image_format format;
 	VkSamplerYcbcrConversion conversion;
