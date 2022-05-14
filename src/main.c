@@ -377,6 +377,7 @@ create_swapchain(struct vulkan_ctx *vk, VkSurfaceKHR surface,
 struct app_params {
 	uint32_t width;
 	uint32_t height;
+	bool disjoint;
 	enum image_format format;
 	char *image_path;
 };
@@ -386,9 +387,10 @@ parse_args(struct app_params *params, int argc, char *argv[]) {
 	params->width = -1;
 	params->height = -1;
 	params->format = -1;
+	params->disjoint = false;
 
 	int opt;
-	while ((opt = getopt(argc, argv, "w:h:f:")) != -1) {
+	while ((opt = getopt(argc, argv, "w:h:f:d")) != -1) {
 		switch (opt) {
 			case 'w':
 				params->width = atoi(optarg);
@@ -412,6 +414,9 @@ parse_args(struct app_params *params, int argc, char *argv[]) {
 					exit(EXIT_FAILURE);
 				}
 				break;
+			case 'd':
+				params->disjoint = true;
+				break;
 			default:
 				goto fail;
 		}
@@ -425,8 +430,9 @@ parse_args(struct app_params *params, int argc, char *argv[]) {
 	return;
 
 fail:
-	fprintf(stderr, "usage: %s [-w width] [-h height] [-f format] "
-			"file\n", argv[0]);
+	fprintf(stderr, "usage: %s [-w width] [-h height] [-f format] [-d] file\n"
+			"  -d\tenable disjoint planes\n",
+			argv[0]);
 	exit(EXIT_FAILURE);
 }
 
@@ -618,7 +624,7 @@ app_init(struct app *ini, struct app_params *params) {
 	assert(res == VK_SUCCESS);
 
 	res = image_init_from_file(&ini->image, vk, params->image_path,
-			params->width, params->height, params->format, false);
+			params->width, params->height, params->format, params->disjoint);
 	assert(res == VK_SUCCESS);
 
 	res = image_sampler_init(&ini->sampler, vk, params->format);
