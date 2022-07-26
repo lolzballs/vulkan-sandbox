@@ -582,12 +582,9 @@ app_render(struct app *app) {
 }
 
 void
-app_init(struct app *ini, struct app_params *params) {
-	struct vulkan_ctx_features features = {
-		.enable_ycbcr_conversion = true,
-	};
-	struct vulkan_ctx *vk = vulkan_ctx_create(&features);
+app_init(struct app *ini, struct app_params *params, struct vulkan_ctx *vk) {
 	ini->vk = vk;
+
 	struct window *window = window_create();
 	ini->window = window;
 
@@ -712,7 +709,12 @@ int main(int argc, char *argv[]) {
 	struct app_params params;
 	parse_args(&params, argc, argv);
 
-	app_init(&app, &params);
+	struct vulkan_ctx_features features = {
+		.enable_ycbcr_conversion = true,
+	};
+	struct vulkan_ctx *vk = vulkan_ctx_create(&features);
+
+	app_init(&app, &params, vk);
 	app_run(&app);
 	app_finish(&app);
 }
