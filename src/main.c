@@ -383,6 +383,19 @@ struct app_params {
 };
 
 static void
+validate_args(struct app_params *params, struct vulkan_ctx *vk) {
+	VkFormatProperties format_properties;
+	vkGetPhysicalDeviceFormatProperties(vk->physical_device,
+			image_format_to_vk_format(params->format), &format_properties);
+	if (params->disjoint && !(format_properties.linearTilingFeatures
+				& VK_FORMAT_FEATURE_DISJOINT_BIT)) {
+		fprintf(stderr, "validate_args - VK_FORMAT_FEATURE_DISJOINT_BIT "
+				"not supported... disabling disjoint feature\n");
+		params->disjoint = false;
+	}
+}
+
+static void
 parse_args(struct app_params *params, int argc, char *argv[]) {
 	params->width = -1;
 	params->height = -1;
@@ -713,6 +726,7 @@ int main(int argc, char *argv[]) {
 		.enable_ycbcr_conversion = true,
 	};
 	struct vulkan_ctx *vk = vulkan_ctx_create(&features);
+	validate_args(&params, vk);
 
 	app_init(&app, &params, vk);
 	app_run(&app);
