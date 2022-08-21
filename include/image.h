@@ -9,7 +9,7 @@ enum image_format {
 	IMAGE_FORMAT_422P,
 };
 
-static VkFormat
+static inline VkFormat
 image_format_to_vk_format(enum image_format format) {
 	switch (format) {
 		case IMAGE_FORMAT_YU12:
@@ -22,7 +22,7 @@ image_format_to_vk_format(enum image_format format) {
 	return VK_FORMAT_UNDEFINED;
 }
 
-static uint32_t
+static inline uint32_t
 image_format_plane_count(enum image_format format) {
 	switch (format) {
 		case IMAGE_FORMAT_YU12:
@@ -35,7 +35,7 @@ image_format_plane_count(enum image_format format) {
 	return -1;
 }
 
-static size_t
+static inline size_t
 image_format_size(enum image_format format, uint32_t width, uint32_t height) {
 	switch (format) {
 		case IMAGE_FORMAT_YU12:
@@ -48,7 +48,7 @@ image_format_size(enum image_format format, uint32_t width, uint32_t height) {
 	return -1;
 }
 
-static void
+static inline void
 image_format_plane_size(enum image_format format, 
 		uint32_t base_width, uint32_t base_height,
 		uint32_t *plane_width, uint32_t *plane_height, uint32_t plane) {
