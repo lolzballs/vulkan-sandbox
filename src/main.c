@@ -38,7 +38,7 @@ create_renderpass(struct vulkan_ctx *vk, VkRenderPass *render_pass) {
 
 	VkAttachmentReference color_attachment = {
 		.attachment = 0,
-		.layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+		.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 	};
 
 	VkSubpassDescription subpass_desc = {
